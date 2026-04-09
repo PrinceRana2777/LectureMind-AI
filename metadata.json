@@ -1,0 +1,7 @@
+{
+  "name": "LectureMind AI",
+  "description": "AI-powered study assistant for JEE/NEET aspirants. Converts lectures into structured notes, flashcards, and quizzes with subject-specific intelligence.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
