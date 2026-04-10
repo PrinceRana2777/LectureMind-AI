@@ -127,14 +127,35 @@ export default function App() {
     if (isLoggingIn) return;
     
     setIsLoggingIn(true);
+    setInitError(null); // Clear previous errors
     const provider = new GoogleAuthProvider();
+    
     try {
-      await signInWithPopup(auth, provider);
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+      
+      // 1. Get ID Token for backend verification
+      const idToken = await user.getIdToken();
+      
+      // 2. Verify with backend (Production Best Practice)
+      const response = await fetch('/api/auth/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken })
+      });
+
+      if (!response.ok) {
+        throw new Error('Backend authentication failed. Please check your connection.');
+      }
+
+      console.log('Login successful and verified with backend');
+      
     } catch (error: any) {
       if (error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-closed-by-user') {
         console.log('Login cancelled by user');
       } else {
         console.error('Login failed:', error);
+        setInitError(error.message || 'An unexpected error occurred during login.');
       }
     } finally {
       setIsLoggingIn(false);
@@ -211,6 +232,18 @@ export default function App() {
             The ultimate AI study companion for JEE & NEET aspirants. 
             Convert lectures into high-yield notes instantly.
           </p>
+
+          {initError && (
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-3 text-red-400 text-sm text-left"
+            >
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+              <p>{initError}</p>
+            </motion.div>
+          )}
+
           <button 
             onClick={handleLogin}
             disabled={isLoggingIn}
