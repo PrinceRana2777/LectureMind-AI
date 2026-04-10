@@ -33,7 +33,9 @@ import {
   ChevronRight,
   BrainCircuit,
   GraduationCap,
-  Youtube
+  Youtube,
+  AlertCircle,
+  RefreshCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -56,56 +58,86 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activePage, setActivePage] = useState<'lectures' | 'flashcards' | 'quizzes'>('lectures');
   const [activeFilter, setActiveFilter] = useState('All');
+  const [initError, setInitError] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   useEffect(() => {
+    let unsubLectures: (() => void) | null = null;
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setUser(user);
-      if (user) {
-        // Ensure user profile exists
-        const userRef = doc(db, 'users', user.uid);
-        const userSnap = await getDoc(userRef);
-        if (!userSnap.exists()) {
-          await setDoc(userRef, {
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName,
-            photoURL: user.photoURL,
-            createdAt: serverTimestamp()
+      try {
+        setUser(user);
+        if (user) {
+          // Ensure user profile exists
+          const userRef = doc(db, 'users', user.uid);
+          try {
+            const userSnap = await getDoc(userRef);
+            if (!userSnap.exists()) {
+              await setDoc(userRef, {
+                uid: user.uid,
+                email: user.email,
+                displayName: user.displayName,
+                photoURL: user.photoURL,
+                createdAt: serverTimestamp()
+              });
+            }
+          } catch (err) {
+            console.error('Error checking/creating user profile:', err);
+            // We don't block the whole app if profile creation fails, 
+            // but we should log it.
+          }
+
+          // Listen for lectures
+          const q = query(
+            collection(db, 'lectures'),
+            where('userId', '==', user.uid),
+            orderBy('createdAt', 'desc')
+          );
+
+          unsubLectures = onSnapshot(q, (snapshot) => {
+            const fetchedLectures = snapshot.docs.map(doc => ({
+              id: doc.id,
+              ...doc.data()
+            })) as Lecture[];
+            setLectures(fetchedLectures);
+            setLoading(false);
+          }, (err) => {
+            console.error('Firestore snapshot error:', err);
+            setInitError('Failed to load lectures. Please check your permissions.');
+            setLoading(false);
           });
-        }
-
-        // Listen for lectures
-        const q = query(
-          collection(db, 'lectures'),
-          where('userId', '==', user.uid),
-          orderBy('createdAt', 'desc')
-        );
-
-        const unsubLectures = onSnapshot(q, (snapshot) => {
-          const fetchedLectures = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          })) as Lecture[];
-          setLectures(fetchedLectures);
+        } else {
+          setLectures([]);
           setLoading(false);
-        });
-
-        return () => unsubLectures();
-      } else {
-        setLectures([]);
+        }
+      } catch (err) {
+        console.error('Auth state change error:', err);
+        setInitError('Failed to initialize authentication.');
         setLoading(false);
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (unsubLectures) unsubLectures();
+    };
   }, []);
 
   const handleLogin = async () => {
+    if (isLoggingIn) return;
+    
+    setIsLoggingIn(true);
     const provider = new GoogleAuthProvider();
     try {
       await signInWithPopup(auth, provider);
-    } catch (error) {
-      console.error('Login failed:', error);
+    } catch (error: any) {
+      if (error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-closed-by-user') {
+        console.log('Login cancelled by user');
+      } else {
+        console.error('Login failed:', error);
+      }
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -120,6 +152,27 @@ export default function App() {
 
   const allFlashcards = lectures.flatMap(l => l.flashcards || []);
   const allQuizzes = lectures.flatMap(l => l.quiz || []);
+
+  if (initError) {
+    return (
+      <div className="min-h-screen bg-[#0A0A0A] text-white flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-20 h-20 bg-red-500/20 rounded-3xl flex items-center justify-center mb-8 shadow-2xl shadow-red-500/20">
+          <AlertCircle className="text-red-500 w-12 h-12" />
+        </div>
+        <h1 className="text-3xl font-bold mb-4">Initialization Error</h1>
+        <p className="text-gray-400 mb-8 max-w-md leading-relaxed">
+          {initError}
+        </p>
+        <button
+          onClick={() => window.location.reload()}
+          className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3 rounded-2xl font-bold flex items-center gap-2 transition-all active:scale-95 shadow-lg shadow-indigo-500/20"
+        >
+          <RefreshCcw className="w-5 h-5" />
+          Try Again
+        </button>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -160,10 +213,15 @@ export default function App() {
           </p>
           <button 
             onClick={handleLogin}
-            className="w-full bg-white text-black font-semibold py-4 px-8 rounded-2xl flex items-center justify-center gap-3 hover:bg-gray-100 transition-all active:scale-95 shadow-xl"
+            disabled={isLoggingIn}
+            className="w-full bg-white text-black font-semibold py-4 px-8 rounded-2xl flex items-center justify-center gap-3 hover:bg-gray-100 transition-all active:scale-95 shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
-            Sign in with Google
+            {isLoggingIn ? (
+              <RefreshCcw className="w-5 h-5 animate-spin" />
+            ) : (
+              <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
+            )}
+            {isLoggingIn ? 'Signing in...' : 'Sign in with Google'}
           </button>
           <p className="mt-8 text-xs text-gray-500 uppercase tracking-widest font-medium">
             Optimized for Physics, Chemistry, Biology & Maths

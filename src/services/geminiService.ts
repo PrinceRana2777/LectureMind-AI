@@ -1,7 +1,19 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Lecture, Subject } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Lazy initialization to prevent crash if API key is missing at load time
+let genAI: GoogleGenAI | null = null;
+
+function getGenAI() {
+  if (!genAI) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error('GEMINI_API_KEY is not configured. Please add it to your environment variables.');
+    }
+    genAI = new GoogleGenAI({ apiKey });
+  }
+  return genAI;
+}
 
 export function getYouTubeId(url: string): string | null {
   const regExp = /(?:youtube\.com\/(?:watch\?v=|live\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
@@ -14,7 +26,7 @@ export async function processYouTubeLecture(url: string, title: string): Promise
   if (!videoId) throw new Error('Invalid YouTube URL');
 
   const normalizedUrl = `https://www.youtube.com/watch?v=${videoId}`;
-  const model = "gemini-3-flash-preview";
+  const modelName = "gemini-3-flash-preview";
   
   // In a real production app, we would use a tool to fetch the transcript or audio.
   // For this demo, we'll use Gemini's ability to reason about public content if possible,
@@ -40,8 +52,8 @@ export async function processYouTubeLecture(url: string, title: string): Promise
     Return the result in JSON format.
   `;
 
-  const response = await ai.models.generateContent({
-    model,
+  const response = await (getGenAI() as any).models.generateContent({
+    model: modelName,
     contents: [{ parts: [{ text: prompt }] }],
     config: {
       responseMimeType: "application/json",
@@ -110,10 +122,7 @@ export async function processYouTubeLecture(url: string, title: string): Promise
 }
 
 export async function processLecture(file: File, title: string): Promise<Partial<Lecture>> {
-  // In a real app, we'd send the file to Gemini. 
-  // Since we are in a browser environment, we can use the File API.
-  
-  const model = "gemini-3-flash-preview";
+  const modelName = "gemini-3-flash-preview";
   
   // Convert file to base64
   const base64Data = await new Promise<string>((resolve) => {
@@ -140,8 +149,8 @@ export async function processLecture(file: File, title: string): Promise<Partial
     Return the result in JSON format.
   `;
 
-  const response = await ai.models.generateContent({
-    model,
+  const response = await (getGenAI() as any).models.generateContent({
+    model: modelName,
     contents: [
       {
         parts: [
